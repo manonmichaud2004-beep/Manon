@@ -1,0 +1,322 @@
+# -*- coding: utf-8 -*-
+"""
+
+
+(c) S. Bertrand - 
+"""
+
+import math
+import Robot as rob
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+import Timer as tmr
+import Potential
+
+
+# ==========================================================
+# INITIALISATION DU ROBOT
+# ==========================================================
+
+x0 = -20.0
+y0 = -20.0
+theta0 = np.pi/4.0
+
+robot = rob.Robot(x0, y0, theta0)
+
+
+# ==========================================================
+# CHAMP DE POTENTIEL (nuage)
+# ==========================================================
+
+pot = Potential.Potential(difficulty=1, random=True)
+
+
+# ==========================================================
+# WAYPOINT MANAGER (structure de base du framework)
+# ==========================================================
+
+WPlist = [[x0, y0]]
+epsilonWP = 0.2
+WPManager = rob.WPManager(WPlist, epsilonWP)
+
+
+# ==========================================================
+# SIMULATION
+# ==========================================================
+
+t0 = 0.0
+tf = 200.0
+dt = 0.01
+
+simu = rob.RobotSimulation(robot, t0, tf, dt)
+
+
+# ==========================================================
+# FONCTION DE PILOTAGE
+# ==========================================================
+
+def piloter_robot(v, w):
+    """
+    Applique les vitesses au robot,
+    intègre le mouvement,
+    enregistre les données dans la simulation
+    """
+    robot.setV(v)
+    robot.setOmega(w)
+    robot.integrateMotion(dt)
+
+    val = pot.value([robot.x, robot.y])
+
+    simu.addData(robot, WPManager, v, robot.theta, w, val)
+
+    return val
+
+
+# ==========================================================
+# ===================  MISSION 1  ==========================
+# ==========================================================
+# Recherche du centre du nuage
+# Validation PHYSIQUE par inversion de pente
+# ==========================================================
+
+print("MISSION 1 : Recherche du centre")
+
+R_MISSION = 1.0
+V_VITESSE = 1.0
+
+W_CERCLE = V_VITESSE / R_MISSION
+TEMPS_UN_TOUR = (2 * math.pi) / W_CERCLE
+
+
+# ----------------------------
+# 1) Exploration circulaire
+# ----------------------------
+
+for t in np.arange(0, TEMPS_UN_TOUR, dt):
+    piloter_robot(V_VITESSE, W_CERCLE)
+
+
+# ----------------------------
+# 2) Montée vers le maximum
+#    Validation par ΔP
+# ----------------------------
+
+p_prev = pot.value([robot.x, robot.y])
+p_best = p_prev
+pos_best = [robot.x, robot.y]
+
+centre_valide = False
+
+while simu.currentIndex < len(simu.t) and not centre_valide:
+
+    # --- Estimation direction locale (scan discret) ---
+    P0 = pot.value([robot.x, robot.y])
+    best_P, best_theta = P0, robot.theta
+
+    for delta in np.linspace(-0.8, 0.8, 9):
+        test_theta = robot.theta + delta
+        P_test = pot.value([
+            robot.x + 0.5 * math.cos(test_theta),
+            robot.y + 0.5 * math.sin(test_theta)
+        ])
+
+        if P_test > best_P:
+            best_P = P_test
+            best_theta = test_theta
+
+    # --- Rotation vers la meilleure direction ---
+    err = math.atan2(
+        math.sin(best_theta - robot.theta),
+        math.cos(best_theta - robot.theta)
+    )
+
+    while abs(err) > 0.05:
+        piloter_robot(0.0, 2.0 * err)
+        err = math.atan2(
+            math.sin(best_theta - robot.theta),
+            math.cos(best_theta - robot.theta)
+        )
+
+    # --- Avance d'un pas ---
+    piloter_robot(V_VITESSE, 0.0)
+
+    p_current = pot.value([robot.x, robot.y])
+
+    # --- Mémorisation du meilleur point ---
+    if p_current > p_best:
+        p_best = p_current
+        pos_best = [robot.x, robot.y]
+
+    # --- Validation physique : inversion de pente ---
+    if p_current < p_prev - 0.001:
+        centre_valide = True
+        print("Centre validé physiquement")
+
+    p_prev = p_current
+
+
+print("Centre estimé :", pos_best)
+
+centre_trouve = pos_best
+
+
+# ==========================================================
+# ===================  MISSION 2  ==========================
+# ==========================================================
+# Cartographie d'une isovaleur
+# ==========================================================
+
+print("MISSION 2 : Cartographie")
+
+target_level = 200.0
+vitesse = 1.2
+
+depart_trace = None
+deja_loin = False
+p_precedente = pot.value([robot.x, robot.y])
+
+
+while simu.currentIndex < len(simu.t):
+
+    p_actuelle = pot.value([robot.x, robot.y])
+    delta_p = p_actuelle - p_precedente
+
+    # --- Descente vers l'isovaleur ---
+    if p_actuelle > target_level + 1.0:
+
+        # Si on monte encore → demi-tour
+        omega = 2.0 if delta_p > 0 else 0.0
+
+    else:
+        # --- Suivi de l'isovaleur ---
+        if depart_trace is None:
+            depart_trace = [robot.x, robot.y]
+
+        erreur = p_actuelle - target_level
+        omega = erreur
+
+    # --- Application mouvement ---
+    robot.setV(vitesse)
+    robot.setOmega(omega)
+    robot.integrateMotion(dt)
+
+    simu.addData(robot, WPManager, vitesse, robot.theta, omega, p_actuelle)
+
+    p_precedente = p_actuelle
+
+    # --- Condition de boucle complète ---
+    if depart_trace is not None:
+        dist = math.sqrt(
+            (robot.x - depart_trace[0])**2 +
+            (robot.y - depart_trace[1])**2
+        )
+
+        if dist > 5.0:
+            deja_loin = True
+
+        if deja_loin and dist < 1.2:
+            print("Cartographie terminée")
+            break
+
+
+robot.setV(0.0)
+robot.setOmega(0.0)
+
+
+# ==========================================================
+# ====================== AFFICHAGE =========================
+# ==========================================================
+
+plt.close("all")
+
+# Trajectoire XY
+fig, ax = simu.plotXY(1)
+pot.plot(noFigure=None, fig=fig, ax=ax)
+
+# Marquage centre
+ax.plot(
+    centre_trouve[0],
+    centre_trouve[1],
+    'rx',
+    markersize=15,
+    label='Centre détecté'
+)
+plt.legend()
+
+# Orientation
+simu.plotXYTheta(2)
+
+# Potentiel dans le temps
+simu.plotPotential(3)
+
+# Surface 3D
+simu.plotPotential3D(4)
+
+plt.show()
+
+
+# ==========================================================
+# ====================== ANIMATION =========================
+# ==========================================================
+
+fig = plt.figure()
+ax = fig.add_subplot(
+    111,
+    aspect='equal',
+    autoscale_on=False,
+    xlim=(-25, 25),
+    ylim=(-25, 25)
+)
+
+ax.grid()
+ax.set_xlabel('x (m)')
+ax.set_ylabel('y (m)')
+
+robotBody, = ax.plot([], [], 'o-', lw=2)
+robotDirection, = ax.plot([], [], '-', lw=1)
+time_template = 'time = %.1fs'
+time_text = ax.text(0.05, 0.9, '', transform=ax.transAxes)
+potential_template = 'potential = %.1f'
+potential_text = ax.text(0.05, 0.1, '', transform=ax.transAxes)
+
+
+def initAnimation():
+    robotDirection.set_data([], [])
+    robotBody.set_data([], [])
+    robotBody.set_color('r')
+    robotBody.set_markersize(20)
+    time_text.set_text('')
+    potential_text.set_text('')
+    return robotBody, robotDirection, time_text, potential_text
+
+
+def animate(i):
+    robotBody.set_data(simu.x[i], simu.y[i])
+
+    thisx = [simu.x[i],
+             simu.x[i] + 0.5 * math.cos(simu.theta[i])]
+    thisy = [simu.y[i],
+             simu.y[i] + 0.5 * math.sin(simu.theta[i])]
+
+    robotDirection.set_data(thisx, thisy)
+
+    time_text.set_text(time_template % (i * simu.dt))
+    potential_text.set_text(
+        potential_template % (pot.value([simu.x[i], simu.y[i]]))
+    )
+
+    return robotBody, robotDirection, time_text, potential_text
+
+
+ani = animation.FuncAnimation(
+    fig,
+    animate,
+    np.arange(1, len(simu.t)),
+    interval=4,
+    blit=True,
+    init_func=initAnimation,
+    repeat=False
+)
+
+plt.show()
