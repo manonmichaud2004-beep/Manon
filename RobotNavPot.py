@@ -5,7 +5,7 @@ Way Point navigtion
 (c) S. Bertrand
 """
 
-import mat
+import math
 import Robot as rob
 import numpy as np
 import matplotlib.pyplot as plt
