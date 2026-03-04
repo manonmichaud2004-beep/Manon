@@ -21,7 +21,7 @@ robot = rob.Robot(x0, y0, theta0)
 
 
 # potential
-pot = Potential.Potential(difficulty=1, random=True)
+pot = Potential.Potential(difficulty=3, random=True)
 
 
 # position control loop: gain and timer
@@ -63,8 +63,8 @@ firstIter = True
 # Mission 1
 
 # paramètres
-R_MISSION = 1.0 
-V_VITESSE = 1.0  
+R_MISSION = 1.0
+V_VITESSE = 3.0
 
 
 W_CERCLE = V_VITESSE / R_MISSION
@@ -79,7 +79,7 @@ def piloter_robot(v, w):
     return val
 
 
-for cycle in range(2):
+for cycle in range(3):
     p_min, p_max = float('inf'), float('-inf')
     pos_min, pos_max = [0,0], [0,0]
 
@@ -104,7 +104,7 @@ for cycle in range(2):
     p_prec = 0
     while True:
         val = piloter_robot(V_VITESSE, 0.0)
-        if val < p_prec - 0.001: 
+        if val < p_prec: 
             break
         p_prec = val
     
@@ -114,7 +114,7 @@ for cycle in range(2):
 # Mission 2
 
 target_level = 200.0
-vitesse = 1.2
+vitesse = 2
 depart_trace = None
 deja_loin = False
 p_precedente = pot.value([robot.x, robot.y])
@@ -127,7 +127,7 @@ while simu.currentIndex < len(simu.t):
     delta_p = p_actuelle - p_precedente
     
     # direction
-    if p_actuelle > target_level + 1.0:
+    if p_actuelle > target_level:
         # On est trop haut : on doit descendre
         # Si delta_p est positif on s'approche du pic -> il faut faire demi-tour
         # Si delta_p est négatif on s'éloigne du pic -> on est dans le bon sens
@@ -138,7 +138,7 @@ while simu.currentIndex < len(simu.t):
             depart_trace = [robot.x, robot.y]
         
 
-        # L'erreur ajuste le rayon de braquage
+        # L'erreur ajuste le braquage
         erreur = p_actuelle - target_level
         omega = erreur 
 
@@ -156,7 +156,7 @@ while simu.currentIndex < len(simu.t):
         dist = math.sqrt((robot.x - depart_trace[0])**2 + (robot.y - depart_trace[1])**2)
         if dist > 5.0:
             deja_loin = True
-        if deja_loin and dist < 1.2:
+        if deja_loin and dist < 1.0:
             print("Mission 2 terminée")
             break
 
